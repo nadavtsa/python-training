@@ -1,13 +1,13 @@
 from flask_restful import Resource, reqparse
 import sqlite3
-from flask_jwt import jwt_required
+from flask_jwt_extended import jwt_required, jwt_optional, get_jwt_identity
 
 
 class Item(Resource):
     parser = reqparse.RequestParser()
     parser.add_argument('price', type=float, required=True, help="This field cannot be left blank!")
 
-    @jwt_required()
+    @jwt_required
     def get(self, name):
         item = self.find_by_name(name)
         if item:
@@ -79,10 +79,15 @@ class Item(Resource):
 
 
 class ItemList(Resource):
+    @jwt_optional
     def get(self):
+        user_id = get_jwt_identity()
         connection = sqlite3.connect('data.db')
         cursor = connection.cursor()
         _items = cursor.execute("SELECT * FROM items").fetchall()
         connection.close()
-        return {'items': [{'name': item[0], 'price': item[1]} for item in _items]}, 200
+        if user_id:
+            return {'items': [{'name': item[0], 'price': item[1]} for item in _items]}, 200
+        return {'meaasge': 'Please log in to get the items list'}
+
 

@@ -1,8 +1,13 @@
 import sqlite3
 from flask_restful import Resource, reqparse
+from werkzeug.security import safe_str_cmp
+from flask_jwt_extended import create_access_token, create_refresh_token, jwt_required, get_jwt_claims, jwt_refresh_token_required, get_jwt_identity
 
 
+_user_parser = reqparse.RequestParser()
 
+_user_parser.add_argument('username', type=str, required=True, help="Username field cannot be left blank!")
+_user_parser.add_argument('password', type=str, required=True, help="Password field cannot be left blank!")
 
 class User:
     def __init__(self, _id, username, password):
@@ -46,13 +51,8 @@ class User:
 
 
 class UserRegister(Resource):
-    parser = reqparse.RequestParser()
-
-    parser.add_argument('username', type=str, required=True, help="Username field cannot be left blank!")
-    parser.add_argument('password', type=str, required=True, help="Password field cannot be left blank!")
-
     def post(self):
-        data = UserRegister.parser.parse_args()
+        data = _user_parser.parse_args()
 
         if User.find_by_username((data['username'])):
             return {'message': 'The username {} already exist'.format(data['username'])}, 400
@@ -89,13 +89,18 @@ class UserResource(Resource):
 
 
 class Users(Resource):
+    @jwt_required
     def get(self):
+        claims = get_jwt_claims()
+        if not claims['is_admin']:
+            return {'message': 'Admin privilege required'}, 401
         connection = sqlite3.connect('data.db')
         cursor = connection.cursor()
         users = cursor.execute("SELECT * FROM users").fetchall()
         connection.close()
         return {'users': [{'id': user[0], 'username': user[1]} for user in users]}, 200
 
+    @jwt_required
     def delete(self):
         connection = sqlite3.connect('data.db')
         cursor = connection.cursor()
@@ -104,3 +109,25 @@ class Users(Resource):
         connection.close()
         return {'messgae': 'All users were deleted successfully'}
 
+
+class UserLogin(Resource):
+
+    @classmethod
+    def post(cls):
+        data = _user_parser.parse_args()
+        user = User.find_by_username(data['username'])
+        if user and safe_str_cmp(user.password, data['password']):
+            access_token = create_access_token(identity=user.id, fresh=True)
+            refresh_token = create_refresh_token(user.id)
+            return {
+                'access_token': access_token,
+                'refresh_token': refresh_token
+            }, 200
+        return {'message': 'Invalid credentials'}, 401
+
+
+class TokenRefresh(Resource):
+    @jwt_refresh_token_required
+    def post(self):
+        curr_user = get_jwt_identity()
+        new_token = create_access_token(identity=curr_user, fresh=False)
